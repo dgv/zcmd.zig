@@ -102,7 +102,7 @@ It is a single file lib with no dependencies!
 
 ## Zig Docs
 
-Zig docs is hosted in github pages at: https://liyu1981.github.io/zcmd.zig/docs/index.html#A;zcmd, please go there to
+Zig docs is hosted in github pages at: [https://liyu1981.github.io/zcmd.zig/](https://liyu1981.github.io/zcmd.zig/), please go there to
 find what apis `zcmd.zig` provides.
 
 ## Coverage
