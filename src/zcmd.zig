@@ -10,6 +10,9 @@ const OS_PAGE_SIZE = switch (builtin.os.tag) {
     },
 };
 
+const native_os = builtin.os.tag;
+const uid_t = if (native_os == .windows or native_os == .wasi) void else std.posix.uid_t;
+
 const MAX_OUTPUT = 8 * 1024 * 1024 * 1024;
 
 pub const Term = union(enum) {
@@ -19,11 +22,11 @@ pub const Term = union(enum) {
     Unknown: u32,
 
     pub fn fromStatus(status: u32) Term {
-        return if (std.os.W.IFEXITED(status))
-            Term{ .Exited = std.os.W.EXITSTATUS(status) }
-        else if (std.os.W.IFSIGNALED(status))
-            Term{ .Signal = std.os.W.TERMSIG(status) }
-        else if (std.os.W.IFSTOPPED(status))
+        return if (std.os.linux.W.IFEXITED(status))
+            Term{ .Exited = std.os.linux.W.EXITSTATUS(status) }
+        else if (std.os.linux.W.IFSIGNALED(status))
+            Term{ .Signal = std.os.linux.W.TERMSIG(status) }
+        else if (std.os.linux.W.IFSTOPPED(status))
             // Term{ .Stopped = std.os.W.STOPSIG(status) }
             unreachable
         else
@@ -43,13 +46,13 @@ pub const ZcmdError = error{
 } || RunFnError ||
     std.fs.File.OpenError ||
     std.fs.File.WriteError ||
-    std.os.AccessError ||
-    std.os.ChangeCurDirError ||
-    std.os.ExecveError ||
-    std.os.PipeError ||
-    std.os.ReadError ||
-    std.os.SetIdError ||
-    std.os.ShutdownError;
+    std.fs.Dir.AccessError ||
+    std.posix.ChangeCurDirError ||
+    std.posix.ExecveError ||
+    std.posix.PipeError ||
+    std.posix.ReadError ||
+    std.posix.SetIdError ||
+    std.posix.ShutdownError;
 
 pub const RunResult = struct {
     const WHITE_SPACES = " \t\n\r";
@@ -162,8 +165,8 @@ pub const ZcmdArgs = struct {
     commands: []const []const []const u8,
     stdin_input: ?[]const u8 = null,
     user_name: ?[]const u8 = null,
-    uid: ?std.os.uid_t = null,
-    gid: ?std.os.uid_t = null,
+    uid: ?uid_t = null,
+    gid: ?uid_t = null,
     cwd: ?[]const u8 = null,
     cwd_dir: ?std.fs.Dir = null,
     env_map: ?*const std.process.EnvMap = null,
@@ -220,8 +223,8 @@ pub fn run(args: struct {
     commands: []const []const []const u8,
     stdin_input: ?[]const u8 = null,
     user_name: ?[]const u8 = null,
-    uid: ?std.os.uid_t = null,
-    gid: ?std.os.uid_t = null,
+    uid: ?uid_t = null,
+    gid: ?uid_t = null,
     cwd: ?[]const u8 = null,
     cwd_dir: ?std.fs.Dir = null,
     env_map: ?*const std.process.EnvMap = null,
@@ -238,12 +241,12 @@ pub fn run(args: struct {
     const stdin_pipe = brk: {
         if (args.stdin_input != null) {
             has_stdin_pipe = true;
-            break :brk try std.os.pipe2(pipe_flags);
+            break :brk try std.posix.pipe2(pipe_flags);
         } else break :brk undefined;
     };
-    const stdout_pipe = try std.os.pipe2(pipe_flags);
-    const stderr_pipe = try std.os.pipe2(pipe_flags);
-    const err_pipe = try std.os.pipe2(pipe_flags);
+    const stdout_pipe = try std.posix.pipe2(pipe_flags);
+    const stderr_pipe = try std.posix.pipe2(pipe_flags);
+    const err_pipe = try std.posix.pipe2(pipe_flags);
 
     var _args: ZcmdArgs = ZcmdArgs{
         .allocator = args.allocator,
@@ -279,43 +282,43 @@ pub fn run(args: struct {
         @panic("if set cwd, must be absolute path!");
     }
 
-    const pid_result = try std.os.fork();
+    const pid_result = try std.posix.fork();
     if (pid_result == 0) {
         // we are child
         // our wrapper to pipeline, setup all necessary cwd,uid,gid,stdin,stdout,stderr,err here so that we can get
         // result in main process
-        std.os.close(err_pipe[0]);
-        defer std.os.close(err_pipe[1]);
+        std.posix.close(err_pipe[0]);
+        defer std.posix.close(err_pipe[1]);
 
         if (has_stdin_pipe) {
-            std.os.dup2(stdin_pipe[0], std.os.STDIN_FILENO) catch |err| forkChildErrReport(err_pipe[1], err);
+            std.posix.dup2(stdin_pipe[0], std.posix.STDIN_FILENO) catch |err| forkChildErrReport(err_pipe[1], err);
         }
-        std.os.dup2(stdout_pipe[1], std.os.STDOUT_FILENO) catch |err| forkChildErrReport(err_pipe[1], err);
-        std.os.dup2(stderr_pipe[1], std.os.STDERR_FILENO) catch |err| forkChildErrReport(err_pipe[1], err);
+        std.posix.dup2(stdout_pipe[1], std.posix.STDOUT_FILENO) catch |err| forkChildErrReport(err_pipe[1], err);
+        std.posix.dup2(stderr_pipe[1], std.posix.STDERR_FILENO) catch |err| forkChildErrReport(err_pipe[1], err);
         if (has_stdin_pipe) {
-            std.os.close(stdin_pipe[0]);
-            std.os.close(stdin_pipe[1]);
+            std.posix.close(stdin_pipe[0]);
+            std.posix.close(stdin_pipe[1]);
         }
-        std.os.close(stdout_pipe[0]);
-        std.os.close(stdout_pipe[1]);
-        std.os.close(stderr_pipe[0]);
-        std.os.close(stderr_pipe[1]);
+        std.posix.close(stdout_pipe[0]);
+        std.posix.close(stdout_pipe[1]);
+        std.posix.close(stderr_pipe[0]);
+        std.posix.close(stderr_pipe[1]);
 
         if (args.uid) |uid| {
             if (args.gid) |gid| {
-                std.os.setregid(gid, gid) catch |err| forkChildErrReport(err_pipe[1], err);
-                std.os.setreuid(uid, uid) catch |err| forkChildErrReport(err_pipe[1], err);
+                std.posix.setregid(gid, gid) catch |err| forkChildErrReport(err_pipe[1], err);
+                std.posix.setreuid(uid, uid) catch |err| forkChildErrReport(err_pipe[1], err);
             }
         }
 
         if (args.cwd_dir) |cwd_dir| {
-            std.os.fchdir(cwd_dir.fd) catch |err| forkChildErrReport(err_pipe[1], err);
+            std.posix.fchdir(cwd_dir.fd) catch |err| forkChildErrReport(err_pipe[1], err);
         } else if (args.cwd) |cwd| {
-            std.os.chdir(cwd) catch |err| forkChildErrReport(err_pipe[1], err);
+            std.posix.chdir(cwd) catch |err| forkChildErrReport(err_pipe[1], err);
         }
 
         Zcmd._run(_args) catch |err| forkChildErrReport(err_pipe[1], err);
-        std.os.exit(0);
+        std.posix.exit(0);
     } else {
         // we are parent
         // listen to forked child (pipeline), get its stdout,stderr,err incase there is problem
@@ -323,21 +326,21 @@ pub fn run(args: struct {
 
         errdefer {
             // make sure that we terminate pipeline process if return from error
-            std.os.kill(pid_result, std.os.SIG.TERM) catch |err| switch (err) {
+            std.posix.kill(pid_result, std.posix.SIG.TERM) catch |err| switch (err) {
                 // if already gone, let it be
                 error.ProcessNotFound => {},
                 else => {
                     // otherwise Cool Guys Don't Look At Explosions
-                    std.os.kill(pid_result, std.os.SIG.KILL) catch {};
+                    std.posix.kill(pid_result, std.posix.SIG.KILL) catch {};
                 },
             };
         }
 
         if (has_stdin_pipe) {
-            std.os.close(stdin_pipe[0]);
+            std.posix.close(stdin_pipe[0]);
         }
-        std.os.close(stdout_pipe[1]);
-        std.os.close(stderr_pipe[1]);
+        std.posix.close(stdout_pipe[1]);
+        std.posix.close(stderr_pipe[1]);
 
         if (has_stdin_pipe) {
             try _feedStdinInput(stdin_pipe[1], args.stdin_input.?);
@@ -360,14 +363,14 @@ pub fn run(args: struct {
         try writeIntFd(err_pipe[1], std.math.maxInt(ErrInt));
         const err_int = try readIntFd(err_pipe[0]);
         defer {
-            std.os.close(err_pipe[0]);
-            std.os.close(err_pipe[1]);
+            std.posix.close(err_pipe[0]);
+            std.posix.close(err_pipe[1]);
         }
         if (err_int != std.math.maxInt(ErrInt)) {
             return @as(ZcmdError, @errorCast(@errorFromInt(err_int)));
         }
 
-        const result = std.os.waitpid(pid_result, 0);
+        const result = std.posix.waitpid(pid_result, 0);
         return RunResult{
             .allocator = args.allocator,
             .args = _args,
@@ -384,8 +387,8 @@ pub fn runSelfManaged(args: struct {
     commands: []const []const []const u8,
     stdin_input: ?[]const u8 = null,
     user_name: ?[]const u8 = null,
-    uid: ?std.os.uid_t = null,
-    gid: ?std.os.uid_t = null,
+    uid: ?uid_t = null,
+    gid: ?uid_t = null,
     cwd: ?[]const u8 = null,
     cwd_dir: ?std.fs.Dir = null,
     env_map: ?*const std.process.EnvMap = null,
@@ -428,7 +431,7 @@ pub fn runSingle(args: struct {
     });
 }
 
-fn _feedStdinInput(fd: std.os.system.fd_t, stdin_input: []const u8) !void {
+fn _feedStdinInput(fd: std.posix.system.fd_t, stdin_input: []const u8) !void {
     // credit goes to: https://www.reddit.com/r/Zig/comments/13674ed/help_request_using_stdin_with_childprocess/
     const stdin = std.fs.File{ .handle = fd };
 
@@ -441,18 +444,18 @@ fn _feedStdinInput(fd: std.os.system.fd_t, stdin_input: []const u8) !void {
     var offset: usize = 0;
     var wrote_size: usize = 0;
 
-    var fds: [1]std.os.pollfd = undefined;
+    var fds: [1]std.posix.pollfd = undefined;
     fds[0].fd = stdin.handle;
-    fds[0].events = std.os.POLL.OUT;
+    fds[0].events = std.posix.POLL.OUT;
 
     var poll_ready_count: usize = 0;
 
     while (offset < stdin_input.len) {
-        poll_ready_count = try std.os.poll(&fds, -1);
+        poll_ready_count = try std.posix.poll(&fds, -1);
         if (poll_ready_count == 0) {
             continue;
         } else {
-            if (fds[0].revents & std.os.POLL.OUT != 0) {
+            if (fds[0].revents & std.posix.POLL.OUT != 0) {
                 if (offset + batch_size < stdin_input.len) {
                     wrote_size = try stdin.write(stdin_input[offset .. offset + batch_size]);
                 } else {
@@ -486,30 +489,30 @@ fn _run(args: ZcmdArgs) !void {
                 @compileError("Only linux & macos supported.");
             },
         };
-        var pipe = try std.os.pipe2(pipe_flags);
-        const pid_result = try std.os.fork();
+        var pipe = try std.posix.pipe2(pipe_flags);
+        const pid_result = try std.posix.fork();
         if (pid_result == 0) {
             // we are child
             if (i + 1 == args.commands.len) {
                 // at the end just clean up and exit
-                std.os.close(pipe[0]);
-                std.os.close(pipe[1]);
-                std.os.exit(0);
+                std.posix.close(pipe[0]);
+                std.posix.close(pipe[1]);
+                std.posix.exit(0);
             }
-            try std.os.dup2(pipe[0], std.os.STDIN_FILENO);
-            std.os.close(pipe[0]);
-            std.os.close(pipe[1]);
-            pipe = try std.os.pipe2(pipe_flags);
+            try std.posix.dup2(pipe[0], std.posix.STDIN_FILENO);
+            std.posix.close(pipe[0]);
+            std.posix.close(pipe[1]);
+            pipe = try std.posix.pipe2(pipe_flags);
         } else {
             // we are parent
 
             // std.debug.print("\nwill run command: {s}:{d}\n", .{ next_command, i });
             if (i + 1 != args.commands.len) {
-                try std.os.dup2(pipe[1], std.os.STDOUT_FILENO);
+                try std.posix.dup2(pipe[1], std.posix.STDOUT_FILENO);
             }
             // timing is critical, so do not use defer for closing the pipe
-            std.os.close(pipe[0]);
-            std.os.close(pipe[1]);
+            std.posix.close(pipe[0]);
+            std.posix.close(pipe[1]);
 
             Zcmd.executeCommand(
                 args.allocator,
@@ -518,7 +521,7 @@ fn _run(args: ZcmdArgs) !void {
                 args.expand_arg0,
             ) catch |err| {
                 std.io.getStdErr().writer().print("zig: {any}: {s}\n", .{ err, next_command }) catch {};
-                std.os.exit(1);
+                std.posix.exit(1);
             };
             // no way back after this :)
         }
@@ -569,13 +572,13 @@ fn executeCommand(
     };
 
     const exec_error = switch (expand_arg0) {
-        .expand => std.os.execvpeZ_expandArg0(
+        .expand => std.posix.execvpeZ_expandArg0(
             .expand,
             argv_buf.ptr[0].?,
             argv_buf.ptr,
             envp,
         ),
-        .no_expand => std.os.execvpeZ_expandArg0(
+        .no_expand => std.posix.execvpeZ_expandArg0(
             .no_expand,
             argv_buf.ptr[0].?,
             argv_buf.ptr,
@@ -620,7 +623,7 @@ fn forkChildErrReport(fd: i32, err: ZcmdError) noreturn {
         // The _exit(2) function does nothing but make the exit syscall, unlike exit(3)
         std.c._exit(1);
     }
-    std.os.exit(1);
+    std.posix.exit(1);
 }
 
 fn fifoToOwnedArrayList(fifo: *std.io.PollFifo) std.ArrayList(u8) {
@@ -667,36 +670,36 @@ pub fn forkAndRun(
     runFn: *const fn (payload: PayloadType) RunFnError!void,
     payload: PayloadType,
 ) !RunResult {
-    const stdout_pipe = try std.os.pipe();
-    const stderr_pipe = try std.os.pipe();
-    const err_pipe = try std.os.pipe();
-    const pid_result = try std.os.fork();
+    const stdout_pipe = try std.posix.pipe();
+    const stderr_pipe = try std.posix.pipe();
+    const err_pipe = try std.posix.pipe();
+    const pid_result = try std.posix.fork();
 
     if (pid_result == 0) {
         // we are child
 
-        std.os.close(err_pipe[0]);
-        defer std.os.close(err_pipe[1]);
+        std.posix.close(err_pipe[0]);
+        defer std.posix.close(err_pipe[1]);
 
-        std.os.dup2(stdout_pipe[1], std.os.STDOUT_FILENO) catch |err| forkChildErrReport(err_pipe[1], err);
-        std.os.dup2(stderr_pipe[1], std.os.STDERR_FILENO) catch |err| forkChildErrReport(err_pipe[1], err);
-        std.os.close(stdout_pipe[0]);
-        std.os.close(stdout_pipe[1]);
-        std.os.close(stderr_pipe[0]);
-        std.os.close(stderr_pipe[1]);
+        std.posix.dup2(stdout_pipe[1], std.posix.STDOUT_FILENO) catch |err| forkChildErrReport(err_pipe[1], err);
+        std.posix.dup2(stderr_pipe[1], std.posix.STDERR_FILENO) catch |err| forkChildErrReport(err_pipe[1], err);
+        std.posix.close(stdout_pipe[0]);
+        std.posix.close(stdout_pipe[1]);
+        std.posix.close(stderr_pipe[0]);
+        std.posix.close(stderr_pipe[1]);
 
         runFn(payload) catch |err| {
             forkChildErrReport(err_pipe[1], err);
-            std.os.exit(1);
+            std.posix.exit(1);
         };
 
-        std.os.exit(0);
+        std.posix.exit(0);
     }
 
     // we are parent
 
-    std.os.close(stdout_pipe[1]);
-    std.os.close(stderr_pipe[1]);
+    std.posix.close(stdout_pipe[1]);
+    std.posix.close(stderr_pipe[1]);
 
     const max_output_bytes = 8 * 1024 * 1024 * 1024;
 
@@ -717,14 +720,14 @@ pub fn forkAndRun(
     try writeIntFd(err_pipe[1], std.math.maxInt(ErrInt));
     const err_int = try readIntFd(err_pipe[0]);
     defer {
-        std.os.close(err_pipe[0]);
-        std.os.close(err_pipe[1]);
+        std.posix.close(err_pipe[0]);
+        std.posix.close(err_pipe[1]);
     }
     if (err_int != std.math.maxInt(ErrInt)) {
         return @as(ZcmdError, @errorCast(@errorFromInt(err_int)));
     }
 
-    const result = std.os.waitpid(pid_result, 0);
+    const result = std.posix.waitpid(pid_result, 0);
     return RunResult{
         .allocator = arena,
         .args = .{ .allocator = arena, .commands = &[_][]const []const u8{&[_][]const u8{@typeName(PayloadType)}} },
