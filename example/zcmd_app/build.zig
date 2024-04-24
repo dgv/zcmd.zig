@@ -12,7 +12,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const zcmd_dep = b.dependency("zcmd", .{});
-    exe.addModule("zcmd", zcmd_dep.module("zcmd"));
+    exe.root_module.addImport("zcmd", zcmd_dep.module("zcmd"));
 
     b.installArtifact(exe);
 
