@@ -171,7 +171,7 @@ pub const ZcmdArgs = struct {
     cwd_dir: ?std.fs.Dir = null,
     env_map: ?*const std.process.EnvMap = null,
     max_output_bytes: usize = MAX_OUTPUT,
-    expand_arg0: std.ChildProcess.Arg0Expand = .no_expand,
+    expand_arg0: std.process.Child.Arg0Expand = .no_expand,
 };
 
 /// provides an almost identical API like `std.childProcess.run`, but with the ability of running pipeline like `bash`.
@@ -229,7 +229,7 @@ pub fn run(args: struct {
     cwd_dir: ?std.fs.Dir = null,
     env_map: ?*const std.process.EnvMap = null,
     max_output_bytes: usize = MAX_OUTPUT,
-    expand_arg0: std.ChildProcess.Arg0Expand = .no_expand,
+    expand_arg0: std.process.Child.Arg0Expand = .no_expand,
 }) ZcmdError!RunResult {
     const pipe_flags = switch (builtin.os.tag) {
         .linux, .macos => .{},
@@ -393,7 +393,7 @@ pub fn runSelfManaged(args: struct {
     cwd_dir: ?std.fs.Dir = null,
     env_map: ?*const std.process.EnvMap = null,
     max_output_bytes: usize = MAX_OUTPUT,
-    expand_arg0: std.ChildProcess.Arg0Expand = .no_expand,
+    expand_arg0: std.process.Child.Arg0Expand = .no_expand,
 }) anyerror!RunResult {
     return run(.{
         .allocator = std.heap.page_allocator,
@@ -418,7 +418,7 @@ pub fn runSingle(args: struct {
     cwd_dir: ?std.fs.Dir = null,
     env_map: ?*const std.process.EnvMap = null,
     max_output_bytes: usize = 50 * 1024,
-    expand_arg0: std.ChildProcess.Arg0Expand = .no_expand,
+    expand_arg0: std.process.Child.Arg0Expand = .no_expand,
 }) ZcmdError!RunResult {
     return run(.{
         .allocator = args.allocator,
@@ -532,7 +532,7 @@ fn executeCommand(
     allocator: std.mem.Allocator,
     command: []const []const u8,
     env_map: ?*const std.process.EnvMap,
-    expand_arg0: std.ChildProcess.Arg0Expand,
+    expand_arg0: std.process.Child.Arg0Expand,
 ) !void {
     // most of codes are from std.ChildProcess :)
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);

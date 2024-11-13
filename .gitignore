@@ -1,3 +1,4 @@
+.zig-cache/
 a.out
 *.o
 tests/exit_sigabrt
